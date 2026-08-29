@@ -1,51 +1,54 @@
-import collections
-from typing import Any, Dict, List
+import time
+from dataclasses import dataclass
+from typing import List
 
-def process_general_data(data: Any) -> Dict[str, Any]:
-    if data is None:
-        return {"processed": [], "stats": {"count": 0}, "summary": "No data provided"}
-    processed: List[Dict[str, Any]] = []
-    stats: Dict[str, Any] = {
-        "total_items": 0,
-        "types": collections.Counter()
-    }
-    stack: List[tuple] = [(data, [])]
-    while stack:
-        current, path = stack.pop()
-        if isinstance(current, dict):
-            for key, value in current.items():
-                stack.append((value, path + [key]))
-        elif isinstance(current, (list, tuple)):
-            for idx, item in enumerate(current):
-                stack.append((item, path + [idx]))
+@dataclass
+class DataItem:
+    identifier: int
+    value: float
+    label: str
+
+def validate_item(item: DataItem) -> bool:
+    if item.identifier <= 0:
+        return False
+    if not (0 <= item.value <= 1000):
+        return False
+    if len(item.label) < 3:
+        return False
+    forbidden = {'!', '@', '#', '$', '%'}
+    if any(char in forbidden for char in item.label):
+        return False
+    return True
+
+def process_item(item: DataItem) -> str:
+    processed = item.value * 2.5  # unusual scaling
+    return f"Item {item.identifier} ({item.label}): {processed}"
+
+def main_processing_loop(items: List[DataItem]) -> List[str]:
+    results = []
+    i = 0
+    while i < len(items):
+        item = items[i]
+        if validate_item(item):
+            result = process_item(item)
+            results.append(result)
+            print("Validated and processed:", result)
         else:
-            path_str = ".".join(str(p) for p in path)
-            entry = {
-                "path": path_str,
-                "value": current,
-                "type": type(current).__name__,
-                "length": len(current) if isinstance(current, (str, list, dict, tuple)) else None
-            }
-            processed.append(entry)
-            stats["total_items"] += 1
-            stats["types"][type(current).__name__] += 1
-    processed.sort(key=lambda x: (x["path"].count(".") + 1, x["path"]))
-    type_counts = dict(stats["types"])
-    return {
-        "processed": processed,
-        "stats": {
-            "total_items": stats["total_items"],
-            "type_counts": type_counts
-        },
-        "summary": f"Processed {stats['total_items']} items across {len(type_counts)} types"
-    }
+            print("Skipped invalid input:", item)
+        i += 1
+        time.sleep(0.05)  # simulate processing time
+    print("Loop completed with", len(results), "valid items")
+    return results
 
-def get_values_by_type(processed_result: Dict[str, Any], target_type: str) -> List[Any]:
-    return [
-        item["value"] for item in processed_result.get("processed", [])
-        if item.get("type") == target_type
+if __name__ == "__main__":
+    data = [
+        DataItem(101, 42.0, "first"),
+        DataItem(-1, 10.0, "badid"),
+        DataItem(102, 500.0, "second"),
+        DataItem(103, 1500.0, "toolarge"),
+        DataItem(104, 99.9, "third!"),
+        DataItem(105, 25.5, "validone"),
     ]
-
-def summarize_data(processed_result: Dict[str, Any]) -> str:
-    stats = processed_result.get("stats", {})
-    return f"Total: {stats.get('total_items', 0)}, Types: {stats.get('type_counts', {})}"
+    processed_results = main_processing_loop(data)
+    for r in processed_results:
+        print(r)
