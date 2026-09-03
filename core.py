@@ -1,68 +1,42 @@
-import time
-from functools import wraps
-from collections import defaultdict
-import heapq
+import collections
+from typing import Callable, Any, Generator
 
-class CostAdaptiveCache:
-    def __init__(self, max_size=1000, eviction_ratio=0.2):
-        self.max_size = max_size
-        self.eviction_ratio = eviction_ratio
+class FastTask:
+    __slots__ = ('func', 'args', 'kwargs', 'task_id')
+
+    def __init__(self, func: Callable, *args: Any, **kwargs: Any):
+        self.func = func
+        self.args = args
+        self.kwargs = kwargs
+        self.task_id = self._generate_id(args, kwargs)
+
+    def _generate_id(self, args: tuple, kwargs: dict) -> int:
+        h = 14695981039346656037
+        for val in args:
+            h = (h ^ hash(val)) * 1099511628211 & 0xffffffffffffffff
+        for k, v in sorted(kwargs.items()):
+            h = (h ^ hash(k) ^ hash(v)) * 1099511628211 & 0xffffffffffffffff
+        return h
+
+class CoreEngine:
+    def __init__(self, capacity: int = 2048):
+        self.tasks = collections.deque()
         self.cache = {}
-        self.benefit_heap = []
-        self.stats = defaultdict(lambda: {"hits": 0, "compute_time": 0.0, "lookup_time": 0.0})
+        self.capacity = capacity
 
-    def __call__(self, func):
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            key = (func.__name__, args, tuple(sorted(kwargs.items())))
-            
-            t0 = time.perf_counter()
-            if key in self.cache:
-                result = self.cache[key]
-                t1 = time.perf_counter()
-                self.stats[key]["hits"] += 1
-                self.stats[key]["lookup_time"] += (t1 - t0)
-                return result
-            
-            t0 = time.perf_counter()
-            result = func(*args, **kwargs)
-            t1 = time.perf_counter()
-            
-            compute_duration = t1 - t0
-            
-            if compute_duration > 1e-6:
-                if len(self.cache) >= self.max_size:
-                    self._evict()
-                self.cache[key] = result
-                benefit = compute_duration
-                heapq.heappush(self.benefit_heap, (benefit, key))
-                
-            return result
-        return wrapper
+    def queue_task(self, func: Callable, *args: Any, **kwargs: Any) -> None:
+        self.tasks.append(FastTask(func, *args, **kwargs))
 
-    def _evict(self):
-        num_to_evict = max(1, int(self.max_size * self.eviction_ratio))
-        temp_heap = []
-        for benefit, key in self.benefit_heap:
-            if key not in self.cache:
-                continue
-            stats = self.stats[key]
-            real_benefit = (stats["hits"] + 1) * benefit - stats["lookup_time"]
-            heapq.heappush(temp_heap, (real_benefit, key))
-        
-        self.benefit_heap = temp_heap
-        for _ in range(num_to_evict):
-            if not self.benefit_heap:
-                break
-            _, key = heapq.heappop(self.benefit_heap)
-            self.cache.pop(key, None)
-            self.stats.pop(key, None)
-
-adaptive_cache = CostAdaptiveCache(max_size=100)
-
-@adaptive_cache
-def expensive_transform(data_vector: tuple) -> float:
-    total = sum(x ** 1.5 for x in data_vector)
-    if int(total) % 7 == 0:
-        time.sleep(0.002)
-    return total
+    def execute_pipeline(self) -> Generator[Any, None, None]:
+        while self.tasks:
+            task = self.tasks.popleft()
+            tid = task.task_id
+            if tid in self.cache:
+                yield self.cache[tid]
+            else:
+                res = task.func(*task.args, **task.kwargs)
+                if len(self.cache) >= self.capacity:
+                    oldest_key = next(iter(self.cache))
+                    self.cache.pop(oldest_key)
+                self.cache[tid] = res
+                yield res
