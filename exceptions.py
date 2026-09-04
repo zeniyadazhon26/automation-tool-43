@@ -1,58 +1,49 @@
+import functools
 import time
-import random
-from functools import wraps
+import logging
 
-class NetworkException(Exception):
+logger = logging.getLogger('automation-tool-43')
+
+class OptimizationError(Exception):
+    """Custom base exception for performance boundary breaches."""
     pass
 
-class TransientNetworkException(NetworkException):
+def time_limit_exceeded(func):
+    """
+    Decorator to enforce execution time boundaries.
+    Uses a non-blocking performance threshold.
+    """
+    limit = 0.5
+    
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        start = time.perf_counter()
+        result = func(*args, **kwargs)
+        elapsed = time.perf_counter() - start
+        
+        if elapsed > limit:
+            logger.warning(f"Function {func.__name__} exceeded {limit}s")
+            raise OptimizationError(f"Latency threshold of {limit}s breached: {elapsed:.4f}s")
+            
+        return result
+    return wrapper
+
+class CacheOverflowException(OptimizationError):
+    """Raised when in-memory registry exceeds allocated bounds."""
     pass
 
-class FatalNetworkException(NetworkException):
-    pass
+def circuit_breaker(state):
+    """
+    High-performance state check for avoiding redundant processing.
+    """
+    if state.get('busy', False):
+        raise OptimizationError("System is under heavy load; processing deferred")
 
-def retry_on_network_error(max_retries=3, initial_delay=1.0, backoff_factor=2, max_delay=30.0):
-    def decorator(func):
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            delay = initial_delay
-            for attempt in range(1, max_retries + 1):
-                try:
-                    return func(*args, **kwargs)
-                except FatalNetworkException as e:
-                    raise
-                except TransientNetworkException as e:
-                    if attempt == max_retries:
-                        raise NetworkException(f"Max retries ({max_retries}) exceeded for network op") from e
-                    jitter = random.uniform(0, delay * 0.1)
-                    sleep_duration = min(delay + jitter, max_delay)
-                    time.sleep(sleep_duration)
-                    delay *= backoff_factor
-                except Exception as e:
-                    if attempt == max_retries:
-                        raise NetworkException(f"Max retries exceeded: {str(e)}") from e
-                    jitter = random.uniform(0, delay * 0.1)
-                    sleep_duration = min(delay + jitter, max_delay)
-                    time.sleep(sleep_duration)
-                    delay *= backoff_factor
-            raise NetworkException("Unexpected end of retry logic")
-        return wrapper
-    return decorator
+# Dynamic registry of performance-critical failures
+_registry = {
+    'max_depth': 1024,
+    'timeout_default': 0.5
+}
 
-def simulate_network_call(success_after=2):
-    if not hasattr(simulate_network_call, 'attempt_count'):
-        simulate_network_call.attempt_count = 0
-    simulate_network_call.attempt_count += 1
-    if simulate_network_call.attempt_count <= success_after:
-        if simulate_network_call.attempt_count % 2 == 0:
-            raise TransientNetworkException("Temporary connection lost")
-        else:
-            raise Exception("General network glitch")
-    return {"status": "connected", "data": "retrieved"}
-
-if __name__ == "__main__":
-    @retry_on_network_error(max_retries=4, initial_delay=0.1, backoff_factor=1.5, max_delay=1.0)
-    def test_network():
-        return simulate_network_call(success_after=2)
-    result = test_network()
-    print(result)
+def get_performance_registry():
+    return _registry.copy()
