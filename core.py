@@ -1,42 +1,55 @@
-import collections
-from typing import Callable, Any, Generator
+import logging
+import os
 
-class FastTask:
-    __slots__ = ('func', 'args', 'kwargs', 'task_id')
+class AutoRotatingStream:
+    """A file-like stream that handles its own rotation based on size constraints."""
+    def __init__(self, filepath: str, max_bytes: int = 2048, backup_count: int = 2):
+        self.filepath = filepath
+        self.max_bytes = max_bytes
+        self.backup_count = backup_count
+        self._stream = open(self.filepath, "a", encoding="utf-8")
+        self._current_size = os.path.getsize(self.filepath) if os.path.exists(self.filepath) else 0
 
-    def __init__(self, func: Callable, *args: Any, **kwargs: Any):
-        self.func = func
-        self.args = args
-        self.kwargs = kwargs
-        self.task_id = self._generate_id(args, kwargs)
+    def write(self, data: str) -> int:
+        data_len = len(data.encode("utf-8"))
+        if self._current_size + data_len > self.max_bytes:
+            self._rotate()
+        bytes_written = self._stream.write(data)
+        self._stream.flush()
+        self._current_size += bytes_written
+        return bytes_written
 
-    def _generate_id(self, args: tuple, kwargs: dict) -> int:
-        h = 14695981039346656037
-        for val in args:
-            h = (h ^ hash(val)) * 1099511628211 & 0xffffffffffffffff
-        for k, v in sorted(kwargs.items()):
-            h = (h ^ hash(k) ^ hash(v)) * 1099511628211 & 0xffffffffffffffff
-        return h
+    def flush(self) -> None:
+        self._stream.flush()
 
-class CoreEngine:
-    def __init__(self, capacity: int = 2048):
-        self.tasks = collections.deque()
-        self.cache = {}
-        self.capacity = capacity
+    def _rotate(self) -> None:
+        self._stream.close()
+        for i in range(self.backup_count - 1, 0, -1):
+            src = f"{self.filepath}.{i}"
+            dst = f"{self.filepath}.{i+1}"
+            if os.path.exists(src):
+                if os.path.exists(dst):
+                    os.remove(dst)
+                os.rename(src, dst)
+        if os.path.exists(self.filepath):
+            os.rename(self.filepath, f"{self.filepath}.1")
+        self._stream = open(self.filepath, "w", encoding="utf-8")
+        self._current_size = 0
 
-    def queue_task(self, func: Callable, *args: Any, **kwargs: Any) -> None:
-        self.tasks.append(FastTask(func, *args, **kwargs))
+def setup_logger(name: str = "automation_tool") -> logging.Logger:
+    logger = logging.getLogger(name)
+    logger.setLevel(logging.INFO)
+    
+    # Custom stream-based rotating handler bypassing traditional FileHandlers
+    stream = AutoRotatingStream("automation.log", max_bytes=4096, backup_count=3)
+    handler = logging.StreamHandler(stream)
+    formatter = logging.Formatter("[%(asctime)s] %(levelname)s - %(message)s")
+    handler.setFormatter(formatter)
+    
+    logger.addHandler(handler)
+    return logger
 
-    def execute_pipeline(self) -> Generator[Any, None, None]:
-        while self.tasks:
-            task = self.tasks.popleft()
-            tid = task.task_id
-            if tid in self.cache:
-                yield self.cache[tid]
-            else:
-                res = task.func(*task.args, **task.kwargs)
-                if len(self.cache) >= self.capacity:
-                    oldest_key = next(iter(self.cache))
-                    self.cache.pop(oldest_key)
-                self.cache[tid] = res
-                yield res
+if __name__ == "__main__":
+    log = setup_logger()
+    for j in range(100):
+        log.info(f"Automation execution event log sequence counter: {j}")
