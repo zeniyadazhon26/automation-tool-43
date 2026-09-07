@@ -1,17 +1,19 @@
 # automation-tool-43
 
-Automation-tool-43 is a lightweight, high-performance Python framework designed to streamline repetitive task execution across local and remote environments. It provides a robust engine for scheduling workflows and managing system-level automation scripts with minimal overhead.
+`automation-tool-43` is a robust Python-based automation engine designed to streamline repetitive task management and workflow orchestration. It provides a modular framework for developers to script, schedule, and execute complex backend processes with minimal configuration.
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ## Features
 
-*   **Task Scheduling:** Built-in cron-style scheduler to execute Python functions or shell scripts at predefined intervals.
-*   **Logging & Monitoring:** Integrated JSON-based logging system to track process execution, memory usage, and task latency.
-*   **Cross-Platform Support:** Native compatibility with Linux, macOS, and Windows environments using abstracted system calls.
-*   **Dependency Isolation:** Lightweight architecture that leverages standard libraries to ensure low-footprint execution.
+*   **Asynchronous Task Queue:** Leverages `asyncio` to handle high-concurrency background operations without blocking the main execution thread.
+*   **Dynamic Workflow Engine:** Define multi-step automation chains using lightweight YAML configuration files.
+*   **Comprehensive Logging:** Integrated structured logging system for real-time monitoring and post-execution debugging.
+*   **Plugin Architecture:** Easily extend functionality by creating custom decorators and task modules in the `plugins/` directory.
 
 ## Installation
 
-Ensure you have Python 3.8+ installed. You can install the package via pip:
+Ensure you have Python 3.9+ installed. You can install the tool via pip:
 
 ```bash
 # Clone the repository
@@ -24,27 +26,32 @@ pip install -r requirements.txt
 
 ## Usage
 
-Define your automation logic in a task script and register it with the executor.
-
-```python
-from automation import TaskManager
-
-def my_task():
-    print("Executing automated routine...")
-
-manager = TaskManager()
-manager.schedule(task=my_task, interval="every 1 hour")
-manager.run()
-```
-
-Run your automation script directly from the terminal:
+To run a defined automation task, utilize the Command Line Interface (CLI):
 
 ```bash
-python main.py --config config.yaml
+# Execute a task workflow
+python main.py --config workflows/task_init.yaml --verbose
 ```
 
-## License
+**Example configuration snippet (`workflows/task_init.yaml`):**
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+```yaml
+task_name: "data_sync"
+retries: 3
+interval: 60
+actions:
+  - run: "python scripts/fetch_api.py"
+  - run: "python scripts/process_logs.py"
+```
 
-Distributed under the MIT License. See `LICENSE` for more information.
+For advanced users, you can import the engine directly into your own scripts:
+
+```python
+from automation_tool import Engine
+
+engine = Engine(config_path="config.yaml")
+engine.run_async()
+```
+
+## Contributing
+We welcome contributions via Pull Requests. Please ensure all code passes the linting checks defined in `.github/workflows/lint.yml` before submission.
