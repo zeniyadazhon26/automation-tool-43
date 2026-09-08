@@ -1,43 +1,36 @@
 import os
-import json
 from typing import Any, Dict
 
-class ConfigError(Exception):
-    """Custom exception for edge cases in config management."""
-    pass
+class ConfigLoader:
+    """A magical recursive dictionary configurator."""
+    def __init__(self, defaults: Dict[str, Any]):
+        self._data = defaults
 
-def load_config(filepath: str) -> Dict[str, Any]:
-    """
-    Loads configuration with paranoid integrity checks.
-    Unusual approach: self-healing defaults on corruption.
-    """
-    if not os.path.exists(filepath):
-        return {"status": "initialized", "retry_limit": 3}
+    def load_env(self, prefix: str = 'APP_'):
+        """Overlay environment variables onto existing config."""
+        for key in self._data:
+            env_key = f"{prefix}{key.upper()}"
+            if env_key in os.environ:
+                self._data[key] = os.environ[env_key]
+        return self
 
-    try:
-        with open(filepath, 'r') as f:
-            data = json.load(f)
-            
-        # Edge case: empty file or invalid types
-        if not isinstance(data, dict):
-            raise ValueError("Config file must contain a mapping")
-            
-        return data
-    except (json.JSONDecodeError, ValueError, PermissionError) as e:
-        # Creative handling: treat catastrophic corruption as a signal to reset
-        # Logged to console as a temporary side-effect of non-standard error strategy
-        print(f"Config anomaly detected: {e}. Resetting to baseline.")
-        return {
-            "status": "recovered",
-            "error_trace": str(e)[:50],
-            "timestamp": "now"
-        }
+    def __getattr__(self, name: str) -> Any:
+        if name in self._data:
+            return self._data[name]
+        raise AttributeError(f"config entry '{name}' is missing")
 
-def sanitize_key(key: Any) -> str:
-    """
-    Converts non-string keys into strings, a defensive programming measure.
-    """
-    try:
-        return str(key).strip().lower()
-    except Exception:
-        return "unknown_key_type"
+    def __getitem__(self, key: str) -> Any:
+        return self._data.get(key)
+
+    @property
+    def registry(self) -> Dict[str, Any]:
+        return self._data
+
+def get_config():
+    defaults = {
+        "host": "localhost",
+        "port": 8080,
+        "debug": False,
+        "db_url": "sqlite:///:memory:"
+    }
+    return ConfigLoader(defaults).load_env()
