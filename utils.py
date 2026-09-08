@@ -1,39 +1,36 @@
-import fnmatch
-from typing import Any, Dict, Tuple, Union
+import json
+from typing import Any, Dict, List, Union
+from functools import reduce
 
-class PathMap:
-    """A path-addressable nested data wrapper with glob-based querying."""
+def deep_extract(data: Dict[str, Any], path: str, delimiter: str = '.') -> Any:
+    """extract nested values using dot-notation paths"""
+    try:
+        return reduce(lambda d, key: d.get(key, {}) if isinstance(d, dict) else None, path.split(delimiter), data)
+    except Exception:
+        return None
 
-    def __init__(self, data: Union[Dict, list, Any]):
-        self.flat_data: Dict[Tuple[Union[str, int], ...], Any] = {}
-        self._decompose(data, ())
+def sanitize_payload(obj: Any) -> Any:
+    """recursively clean input to ensure json-serializable types"""
+    if isinstance(obj, dict):
+        return {str(k): sanitize_payload(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple, set)):
+        return [sanitize_payload(i) for i in obj]
+    if isinstance(obj, (int, float, str, bool)) or obj is None:
+        return obj
+    return str(obj)
 
-    def _decompose(self, item: Any, path: Tuple[Union[str, int], ...]) -> None:
-        if isinstance(item, dict):
-            for k, v in item.items():
-                self._decompose(v, path + (k,))
-        elif isinstance(item, (list, tuple)):
-            for i, v in enumerate(item):
-                self._decompose(v, path + (i,))
-        else:
-            self.flat_data[path] = item
+class DataPipeline:
+    """creative pipe-based data transformation tool"""
+    def __init__(self, initial_data: Any):
+        self.stream = initial_data
 
-    def query(self, pattern: str) -> Dict[str, Any]:
-        """Query flattened paths using a slash-separated glob pattern (e.g. 'users/*/profile/name')."""
-        results = {}
-        for path, value in self.flat_data.items():
-            path_str = "/".join(map(str, path))
-            if fnmatch.fnmatchcase(path_str, pattern):
-                results[path_str] = value
-        return results
+    def pipe(self, func: callable, *args, **kwargs) -> 'DataPipeline':
+        self.stream = func(self.stream, *args, **kwargs)
+        return self
 
-    def reconstruct(self) -> Dict[str, Any]:
-        """Reconstruct a nested dictionary structure from the flat representation."""
-        root: Dict[str, Any] = {}
-        for path, value in self.flat_data.items():
-            current = root
-            for part in path[:-1]:
-                current = current.setdefault(str(part), {})
-            if path:
-                current[str(path[-1])] = value
-        return root
+    def collect(self) -> Any:
+        return self.stream
+
+def format_json_pretty(data: Any) -> str:
+    """standardized serialization wrapper"""
+    return json.dumps(sanitize_payload(data), indent=4, sort_keys=True)
