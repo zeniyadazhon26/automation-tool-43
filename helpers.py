@@ -1,44 +1,35 @@
 import time
-import functools
 import random
-from typing import Callable, Any
+from functools import wraps
+from typing import Callable, Type, Tuple, Union
 
-def retry_with_jitter(max_retries: int = 3, base_delay: float = 0.1) -> Callable:
-    def decorator(func: Callable) -> Callable:
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs) -> Any:
-            for i in range(max_retries):
+def fibonacci_sequence():
+    a, b = 1, 1
+    while True:
+        yield a
+        a, b = b, a + b
+
+def retry_on_failure(
+    max_attempts: int = 5,
+    exceptions: Union[Type[BaseException], Tuple[Type[BaseException], ...]] = Exception,
+    jitter_range: Tuple[float, float] = (0.5, 1.5)
+):
+    """
+    A creative retry decorator utilizing a Fibonacci-based backoff strategy
+    with configurable randomized jitter to distribute retry attempts.
+    """
+    def decorator(func: Callable):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            delay_generator = fibonacci_sequence()
+            for attempt in range(1, max_attempts + 1):
                 try:
                     return func(*args, **kwargs)
-                except Exception as e:
-                    if i == max_retries - 1:
-                        raise e
-                    time.sleep(base_delay * (2 ** i) + random.uniform(0, 0.1))
+                except exceptions as err:
+                    if attempt == max_attempts:
+                        raise err
+                    raw_delay = next(delay_generator)
+                    jitter = random.uniform(*jitter_range)
+                    time.sleep(raw_delay * jitter)
         return wrapper
     return decorator
-
-def memoize_with_expiry(ttl: int = 300) -> Callable:
-    cache = {}
-    def decorator(func: Callable) -> Callable:
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs) -> Any:
-            key = (args, tuple(sorted(kwargs.items())))
-            now = time.time()
-            if key in cache:
-                result, timestamp = cache[key]
-                if now - timestamp < ttl:
-                    return result
-            result = func(*args, **kwargs)
-            cache[key] = (result, now)
-            return result
-        return wrapper
-    return decorator
-
-def flatten_list(nested: list) -> list:
-    flat = []
-    for item in nested:
-        if isinstance(item, list):
-            flat.extend(flatten_list(item))
-        else:
-            flat.append(item)
-    return flat
