@@ -1,55 +1,64 @@
-import logging
-import os
+import inspect
+from typing import Any, Callable, Dict, List, Optional
 
-class AutoRotatingStream:
-    """A file-like stream that handles its own rotation based on size constraints."""
-    def __init__(self, filepath: str, max_bytes: int = 2048, backup_count: int = 2):
-        self.filepath = filepath
-        self.max_bytes = max_bytes
-        self.backup_count = backup_count
-        self._stream = open(self.filepath, "a", encoding="utf-8")
-        self._current_size = os.path.getsize(self.filepath) if os.path.exists(self.filepath) else 0
 
-    def write(self, data: str) -> int:
-        data_len = len(data.encode("utf-8"))
-        if self._current_size + data_len > self.max_bytes:
-            self._rotate()
-        bytes_written = self._stream.write(data)
-        self._stream.flush()
-        self._current_size += bytes_written
-        return bytes_written
+class CleanContext:
+    """Auto-purging execution context for workflow steps."""
 
-    def flush(self) -> None:
-        self._stream.flush()
+    def __init__(self, **initial_data: Any):
+        self._store: Dict[str, Any] = initial_data
+        self._history: List[str] = []
 
-    def _rotate(self) -> None:
-        self._stream.close()
-        for i in range(self.backup_count - 1, 0, -1):
-            src = f"{self.filepath}.{i}"
-            dst = f"{self.filepath}.{i+1}"
-            if os.path.exists(src):
-                if os.path.exists(dst):
-                    os.remove(dst)
-                os.rename(src, dst)
-        if os.path.exists(self.filepath):
-            os.rename(self.filepath, f"{self.filepath}.1")
-        self._stream = open(self.filepath, "w", encoding="utf-8")
-        self._current_size = 0
+    def set(self, key: str, value: Any) -> None:
+        self._store[key] = value
+        self._history.append(key)
 
-def setup_logger(name: str = "automation_tool") -> logging.Logger:
-    logger = logging.getLogger(name)
-    logger.setLevel(logging.INFO)
-    
-    # Custom stream-based rotating handler bypassing traditional FileHandlers
-    stream = AutoRotatingStream("automation.log", max_bytes=4096, backup_count=3)
-    handler = logging.StreamHandler(stream)
-    formatter = logging.Formatter("[%(asctime)s] %(levelname)s - %(message)s")
-    handler.setFormatter(formatter)
-    
-    logger.addHandler(handler)
-    return logger
+    def get(self, key: str, default: Any = None) -> Any:
+        return self._store.get(key, default)
 
-if __name__ == "__main__":
-    log = setup_logger()
-    for j in range(100):
-        log.info(f"Automation execution event log sequence counter: {j}")
+    def purge_ephemeral(self) -> int:
+        ephemeral_keys = [k for k in self._store if k.startswith("_")]
+        for k in ephemeral_keys:
+            del self._store[k]
+        return len(ephemeral_keys)
+
+
+class AutomationStep:
+    """Pipeline step supporting shift operator composition."""
+
+    def __init__(self, fn: Callable[[CleanContext], Any], name: Optional[str] = None):
+        self.fn = fn
+        self.name = name or fn.__name__
+
+    def __rshift__(self, next_step: "AutomationStep") -> "TaskPipeline":
+        return TaskPipeline([self, next_step])
+
+
+class TaskPipeline:
+    """Reorganized execution pipeline with automatic memory cleanup."""
+
+    def __init__(self, steps: List[AutomationStep]):
+        self.steps = steps
+
+    def __rshift__(self, next_step: AutomationStep) -> "TaskPipeline":
+        self.steps.append(next_step)
+        return self
+
+    def execute(self, **initial_args: Any) -> CleanContext:
+        ctx = CleanContext(**initial_args)
+        for step in self.steps:
+            ctx.set("_current_step", step.name)
+            result = step.fn(ctx)
+            if result is not None:
+                ctx.set(f"out_{step.name}", result)
+            ctx.purge_ephemeral()
+
+        ctx.purge_ephemeral()
+        return ctx
+
+
+def step(name: Optional[str] = None):
+    def decorator(fn: Callable[[CleanContext], Any]) -> AutomationStep:
+        return AutomationStep(fn, name=name)
+
+    return decorator
