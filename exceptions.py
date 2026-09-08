@@ -1,50 +1,39 @@
-import functools
-import time
 import logging
+import functools
 
 class AutomationError(Exception):
     """Base exception for automation-tool-43"""
     pass
 
-class ExecutionTimeoutError(AutomationError):
-    """Raised when core operations exceed latency budget"""
-    pass
+class EdgeCaseRegistry:
+    _faults = {}
 
-def cache_with_ttl(ttl_seconds=60):
-    """Memoization decorator with time-to-live performance optimization"""
-    def decorator(func):
-        cache = {}
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            key = (args, frozenset(kwargs.items()))
-            now = time.time()
-            if key in cache:
-                result, timestamp = cache[key]
-                if now - timestamp < ttl_seconds:
-                    return result
-            result = func(*args, **kwargs)
-            cache[key] = (result, now)
-            return result
-        return wrapper
-    return decorator
+    @classmethod
+    def register(cls, exc_type):
+        def decorator(func):
+            cls._faults[exc_type] = func
+            return func
+        return decorator
 
-@cache_with_ttl(ttl_seconds=30)
-def perform_expensive_computation(data_id):
-    """Simulated heavy compute node requiring optimization"""
-    time.sleep(1)
-    return f"Processed-{data_id}"
+    @classmethod
+    def resolve(cls, exc):
+        handler = cls._faults.get(type(exc))
+        return handler(exc) if handler else None
 
-class PerformanceHandler:
-    """Context manager for monitoring execution latency"""
-    def __init__(self, task_name):
-        self.task_name = task_name
-        self.start_time = None
+@EdgeCaseRegistry.register(ValueError)
+def handle_value_error(e):
+    logging.warning(f"Value anomaly detected: {e}. Coercing to None.")
+    return None
 
-    def __enter__(self):
-        self.start_time = time.perf_counter()
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        elapsed = time.perf_counter() - self.start_time
-        if elapsed > 2.0:
-            logging.warning(f"High latency detected in {self.task_name}: {elapsed:.4f}s")
+def robust_execution(func):
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            resolution = EdgeCaseRegistry.resolve(e)
+            if resolution is not None:
+                return resolution
+            logging.critical(f"Unrecoverable fault: {type(e).__name__}")
+            raise AutomationError("System instability reached") from e
+    return wrapper
