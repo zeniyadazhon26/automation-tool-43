@@ -1,36 +1,54 @@
-import json
-from typing import Any, Dict, List, Union
-from functools import reduce
+import re
+from datetime import datetime
+from typing import Any
 
-def deep_extract(data: Dict[str, Any], path: str, delimiter: str = '.') -> Any:
-    """extract nested values using dot-notation paths"""
-    try:
-        return reduce(lambda d, key: d.get(key, {}) if isinstance(d, dict) else None, path.split(delimiter), data)
-    except Exception:
-        return None
+class FluidMap(dict):
+    """A dictionary wrapper offering attribute access and dynamic string type coercion."""
 
-def sanitize_payload(obj: Any) -> Any:
-    """recursively clean input to ensure json-serializable types"""
-    if isinstance(obj, dict):
-        return {str(k): sanitize_payload(v) for k, v in obj.items()}
-    if isinstance(obj, (list, tuple, set)):
-        return [sanitize_payload(i) for i in obj]
-    if isinstance(obj, (int, float, str, bool)) or obj is None:
-        return obj
-    return str(obj)
+    _TRUE_PATTERNS = re.compile(r"^(true|yes|on|1)$", re.IGNORECASE)
+    _FALSE_PATTERNS = re.compile(r"^(false|no|off|0)$", re.IGNORECASE)
+    _ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}(\.\d+)?)?Z?$")
 
-class DataPipeline:
-    """creative pipe-based data transformation tool"""
-    def __init__(self, initial_data: Any):
-        self.stream = initial_data
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for k, v in list(self.items()):
+            self[k] = self._coerce(v)
 
-    def pipe(self, func: callable, *args, **kwargs) -> 'DataPipeline':
-        self.stream = func(self.stream, *args, **kwargs)
-        return self
+    def _coerce(self, val: Any) -> Any:
+        if isinstance(val, dict):
+            return FluidMap(val)
+        if isinstance(val, list):
+            return [self._coerce(item) for item in val]
+        if isinstance(val, str):
+            val_strip = val.strip()
+            if self._TRUE_PATTERNS.match(val_strip):
+                return True
+            if self._FALSE_PATTERNS.match(val_strip):
+                return False
+            if val_strip.isdigit():
+                return int(val_strip)
+            try:
+                return float(val_strip)
+            except ValueError:
+                pass
+            if self._ISO_DATE.match(val_strip):
+                try:
+                    return datetime.fromisoformat(val_strip.replace("Z", "+00:00"))
+                except ValueError:
+                    pass
+        return val
 
-    def collect(self) -> Any:
-        return self.stream
+    def __getattr__(self, name: str) -> Any:
+        try:
+            return self[name]
+        except KeyError:
+            raise AttributeError(f"'FluidMap' object has no attribute '{name}'")
 
-def format_json_pretty(data: Any) -> str:
-    """standardized serialization wrapper"""
-    return json.dumps(sanitize_payload(data), indent=4, sort_keys=True)
+    def __setattr__(self, name: str, value: Any) -> None:
+        self[name] = self._coerce(value)
+
+    def __delattr__(self, name: str) -> None:
+        try:
+            del self[name]
+        except KeyError:
+            raise AttributeError(f"'FluidMap' object has no attribute '{name}'")
