@@ -1,54 +1,33 @@
-import re
-from datetime import datetime
-from typing import Any
+import os
+import shutil
+from pathlib import Path
+from typing import Union, List
 
-class FluidMap(dict):
-    """A dictionary wrapper offering attribute access and dynamic string type coercion."""
+class CleanupEngine:
+    def __init__(self, target_dir: Union[str, Path]):
+        self.target = Path(target_dir)
 
-    _TRUE_PATTERNS = re.compile(r"^(true|yes|on|1)$", re.IGNORECASE)
-    _FALSE_PATTERNS = re.compile(r"^(false|no|off|0)$", re.IGNORECASE)
-    _ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}(\.\d+)?)?Z?$")
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        for k, v in list(self.items()):
-            self[k] = self._coerce(v)
-
-    def _coerce(self, val: Any) -> Any:
-        if isinstance(val, dict):
-            return FluidMap(val)
-        if isinstance(val, list):
-            return [self._coerce(item) for item in val]
-        if isinstance(val, str):
-            val_strip = val.strip()
-            if self._TRUE_PATTERNS.match(val_strip):
-                return True
-            if self._FALSE_PATTERNS.match(val_strip):
-                return False
-            if val_strip.isdigit():
-                return int(val_strip)
-            try:
-                return float(val_strip)
-            except ValueError:
-                pass
-            if self._ISO_DATE.match(val_strip):
+    def purge_by_extension(self, extensions: List[str]) -> int:
+        count = 0
+        for item in self.target.rglob('*'):
+            if item.suffix.lower() in extensions:
                 try:
-                    return datetime.fromisoformat(val_strip.replace("Z", "+00:00"))
-                except ValueError:
-                    pass
-        return val
+                    item.unlink()
+                    count += 1
+                except OSError:
+                    continue
+        return count
 
-    def __getattr__(self, name: str) -> Any:
-        try:
-            return self[name]
-        except KeyError:
-            raise AttributeError(f"'FluidMap' object has no attribute '{name}'")
+    def reorg_files(self, mapping: dict) -> None:
+        for file_path in self.target.iterdir():
+            if file_path.is_file():
+                dest_folder = mapping.get(file_path.suffix.lower(), 'misc')
+                target_dir = self.target / dest_folder
+                target_dir.mkdir(exist_ok=True)
+                shutil.move(str(file_path), str(target_dir / file_path.name))
 
-    def __setattr__(self, name: str, value: Any) -> None:
-        self[name] = self._coerce(value)
-
-    def __delattr__(self, name: str) -> None:
-        try:
-            del self[name]
-        except KeyError:
-            raise AttributeError(f"'FluidMap' object has no attribute '{name}'")
+def run_maintenance(path: str):
+    engine = CleanupEngine(path)
+    purged = engine.purge_by_extension(['.tmp', '.log', '.bak'])
+    engine.reorg_files({'.jpg': 'images', '.pdf': 'docs', '.py': 'src'})
+    return {'purged_count': purged, 'status': 'optimized'}
