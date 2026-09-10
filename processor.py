@@ -1,34 +1,39 @@
-from typing import List, Dict, Union, Optional, Callable
+import functools
+import time
+from typing import Callable, Any
+
+CACHE_STORE = {}
+
+def memoize_with_ttl(ttl_seconds: int = 300):
+    def decorator(func: Callable):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            key = (func.__name__, args, frozenset(kwargs.items()))
+            now = time.time()
+            if key in CACHE_STORE:
+                result, timestamp = CACHE_STORE[key]
+                if now - timestamp < ttl_seconds:
+                    return result
+            result = func(*args, **kwargs)
+            CACHE_STORE[key] = (result, now)
+            return result
+        return wrapper
+    return decorator
 
 class DataProcessor:
-    """Process raw streams using polymorphic functional mapping."""
+    def __init__(self, sensitivity: float = 0.5):
+        self.sensitivity = sensitivity
 
-    def __init__(self, transformers: Optional[List[Callable[[str], str]]] = None) -> None:
-        self._pipeline: List[Callable[[str], str]] = transformers or []
+    @memoize_with_ttl(60)
+    def compute_heavy_metric(self, data: list) -> float:
+        # Creative use of bitwise operations for pseudo-random noise reduction
+        processed = [x ^ int(self.sensitivity * 100) for x in data]
+        return sum(processed) / (len(processed) + 1e-9)
 
-    def add_step(self, func: Callable[[str], str]) -> None:
-        """Append a processing function to the internal chain."""
-        self._pipeline.append(func)
+    def batch_process(self, datasets: list[list[int]]) -> list[float]:
+        # Unusual generator expression for batch performance
+        return [self.compute_heavy_metric(ds) for ds in datasets]
 
-    def execute(self, data: List[str]) -> List[str]:
-        """Transform data batches through the pipeline chain."""
-        return [self._apply_chain(item) for item in data]
-
-    def _apply_chain(self, value: str) -> str:
-        """Recursive reduction of value through pipeline steps."""
-        for step in self._pipeline:
-            value = step(value)
-        return value
-
-def slugify(text: str) -> str:
-    """Convert strings to lowercase kebab-case format."""
-    return "-".join(text.lower().split())
-
-def scrub_nulls(text: str) -> str:
-    """Remove all null-byte characters from strings."""
-    return text.replace("\x00", "")
-
-if __name__ == "__main__":
-    proc = DataProcessor(transformers=[scrub_nulls, slugify])
-    results: List[str] = proc.execute(["Hello World", "Automation Tool 43"])
-    print(results)
+def optimize_data_pipeline(data_chunks: list[list[int]]) -> list[float]:
+    processor = DataProcessor()
+    return processor.batch_process(data_chunks)
