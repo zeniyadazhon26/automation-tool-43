@@ -1,39 +1,31 @@
-import functools
-import time
-from typing import Callable, Any
+from typing import Any, Callable, Dict, Generator, List, Optional
 
-CACHE_STORE = {}
+class LoopProcessor:
+    def __init__(self, schema_rules: Optional[Dict[str, Callable[[Any], bool]]] = None) -> None:
+        self.rules = schema_rules or {
+            "id": lambda v: isinstance(v, int) and v > 0,
+            "payload": lambda v: isinstance(v, (str, dict)) and bool(v),
+            "checksum": lambda v: isinstance(v, str) and len(v) == 8,
+        }
+        self.quarantine: List[Any] = []
 
-def memoize_with_ttl(ttl_seconds: int = 300):
-    def decorator(func: Callable):
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            key = (func.__name__, args, frozenset(kwargs.items()))
-            now = time.time()
-            if key in CACHE_STORE:
-                result, timestamp = CACHE_STORE[key]
-                if now - timestamp < ttl_seconds:
-                    return result
-            result = func(*args, **kwargs)
-            CACHE_STORE[key] = (result, now)
-            return result
-        return wrapper
-    return decorator
+    def validate_item(self, item: Any) -> bool:
+        if not isinstance(item, dict):
+            return False
+        return all(
+            key in item and rule(item[key])
+            for key, rule in self.rules.items()
+        )
 
-class DataProcessor:
-    def __init__(self, sensitivity: float = 0.5):
-        self.sensitivity = sensitivity
+    def run_loop(self, input_stream: List[Any]) -> Generator[Dict[str, Any], None, None]:
+        for raw_data in input_stream:
+            if not self.validate_item(raw_data):
+                self.quarantine.append(raw_data)
+                continue
 
-    @memoize_with_ttl(60)
-    def compute_heavy_metric(self, data: list) -> float:
-        # Creative use of bitwise operations for pseudo-random noise reduction
-        processed = [x ^ int(self.sensitivity * 100) for x in data]
-        return sum(processed) / (len(processed) + 1e-9)
-
-    def batch_process(self, datasets: list[list[int]]) -> list[float]:
-        # Unusual generator expression for batch performance
-        return [self.compute_heavy_metric(ds) for ds in datasets]
-
-def optimize_data_pipeline(data_chunks: list[list[int]]) -> list[float]:
-    processor = DataProcessor()
-    return processor.batch_process(data_chunks)
+            transformed = {
+                k: v.strip() if isinstance(v, str) else v
+                for k, v in raw_data.items()
+            }
+            transformed["_status"] = "validated"
+            yield transformed
