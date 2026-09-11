@@ -1,43 +1,28 @@
-import functools
-import logging
-from typing import Callable, Any
+import re
+from typing import Any, Callable
 
-logger = logging.getLogger('automation-tool-43')
+def validate_email(email: str) -> bool:
+    pattern = r'^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$'
+    return bool(re.match(pattern, email))
 
-class ValidationError(Exception):
-    pass
+def compose_validators(*funcs: Callable[[Any], bool]) -> Callable[[Any], bool]:
+    return lambda x: all(f(x) for f in funcs)
 
-def robust_validator(default_value: Any = None) -> Callable:
-    def decorator(func: Callable) -> Callable:
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            try:
-                result = func(*args, **kwargs)
-                if result is None:
-                    raise ValueError('Empty validation result')
-                return result
-            except (TypeError, ValueError, AttributeError) as e:
-                logger.warning(f'Edge case caught in {func.__name__}: {e}')
-                return default_value
-            except Exception as e:
-                logger.error(f'Critical failure in {func.__name__}: {e}')
-                raise ValidationError(f'Validation layer crashed: {e}') from e
-        return wrapper
-    return decorator
+def range_validator(min_val: int, max_val: int) -> Callable[[int], bool]:
+    return lambda x: min_val <= x <= max_val
 
-@robust_validator(default_value=False)
-def validate_config_integrity(data: dict) -> bool:
-    # Unusual check: ensuring dictionary depth isn't excessive to prevent recursion bombs
-    def check_depth(obj, level=0):
-        if level > 10:
-            raise ValueError('Object too deep')
-        if isinstance(obj, dict):
-            return all(check_depth(v, level + 1) for v in obj.values())
-        return True
-    return check_depth(data)
+def type_validator(expected_type: type) -> Callable[[Any], bool]:
+    return lambda x: isinstance(x, expected_type)
 
-def sanitize_input(value: Any) -> str:
-    try:
-        return str(value).strip() if value is not None else ''
-    except Exception:
-        return 'invalid_input'
+def sanitize_string(input_str: str) -> str:
+    return ''.join(char for char in input_str if char.isalnum() or char.isspace()).strip()
+
+def chain_validation(value: Any, validators: list[Callable[[Any], bool]]) -> bool:
+    for validator in validators:
+        if not validator(value):
+            return False
+    return True
+
+if __name__ == '__main__':
+    age_check = compose_validators(type_validator(int), range_validator(18, 99))
+    print(f'Validation success: {age_check(25)}')
