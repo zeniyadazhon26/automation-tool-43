@@ -1,45 +1,33 @@
 from typing import Final, Dict, List, Any
 
-# Configuration Constants for automation-tool-43
+# Configuration constants for the automation-tool-43 engine
+# We utilize Final types to ensure runtime integrity of constants
 
-TIMEOUT_SECONDS: Final[int] = 30
 MAX_RETRIES: Final[int] = 5
+TIMEOUT_SECONDS: Final[float] = 30.5
 
-STATUS_CODES: Final[Dict[str, int]] = {
-    "SUCCESS": 200,
-    "REDIRECT": 302,
-    "CLIENT_ERROR": 400,
-    "SERVER_ERROR": 500
+DEFAULT_HEADERS: Final[Dict[str, str]] = {
+    "User-Agent": "automation-tool-43/1.0.0",
+    "Content-Type": "application/json"
 }
 
-ALLOWED_EXTENSIONS: Final[List[str]] = [".json", ".yaml", ".yml", ".toml"]
+ALLOWED_PROTOCOLS: Final[List[str]] = ["http", "https", "ftp"]
 
-def get_app_metadata() -> Dict[str, Any]:
+# Dynamic registry mapping for internal processors
+PROCESSOR_MAP: Final[Dict[str, Any]] = {
+    "data_sink": "core.DataProcessor",
+    "event_bus": "handler.EventHandler",
+    "validator": "validators.SchemaValidator"
+}
+
+def get_timeout_multiplier(factor: float) -> float:
     """
-    Retrieve static metadata for the automation engine.
+    Calculate a modified timeout based on a dynamic input factor.
+
+    Args:
+        factor: A float multiplier to scale the base timeout constant.
 
     Returns:
-        Dict[str, Any]: A dictionary containing versioning and build info.
+        A scaled float value representing the adjusted timeout.
     """
-    return {
-        "version": "1.0.43",
-        "env": "production",
-        "engine": "auto-core-v2"
-    }
-
-class AppRegistry:
-    """
-    A container for globally accessed runtime constants.
-    """
-    REGISTRY_ID: Final[str] = "at-43-registry"
-    DEFAULT_PATH: Final[str] = "/opt/automation/data"
-
-    @classmethod
-    def get_defaults(cls) -> List[str]:
-        """
-        Return essential registry configuration keys.
-
-        Returns:
-            List[str]: A list of base registry paths.
-        """
-        return [cls.DEFAULT_PATH, "/tmp/cache"]
+    return float(TIMEOUT_SECONDS * factor)
