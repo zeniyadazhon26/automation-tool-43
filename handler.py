@@ -1,41 +1,35 @@
+import functools
 import time
-import random
+import collections
 
-def fibonacci_delay(attempt):
-    if attempt <= 1:
-        return 1
-    a, b = 1, 1
-    for _ in range(2, attempt):
-        a, b = b, a + b
-    return b
+class ExecutionCache:
+    def __init__(self, capacity=128):
+        self.cache = collections.OrderedDict()
+        self.capacity = capacity
 
-class NetworkHandler:
-    def __init__(self, max_retries=3, base_delay=1.0):
-        self.max_retries = max_retries
-        self.base_delay = base_delay
+    def __call__(self, func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            key = (args, frozenset(kwargs.items()))
+            if key in self.cache:
+                self.cache.move_to_end(key)
+                return self.cache[key]
+            result = func(*args, **kwargs)
+            self.cache[key] = result
+            self.cache.move_to_end(key)
+            if len(self.cache) > self.capacity:
+                self.cache.popitem(last=False)
+            return result
+        return wrapper
 
-    def execute(self, network_func):
-        last_error = None
-        for attempt in range(1, self.max_retries + 1):
-            try:
-                return network_func()
-            except Exception as error:
-                last_error = error
-                if attempt == self.max_retries:
-                    break
-                delay = fibonacci_delay(attempt) * self.base_delay + random.uniform(0, 0.5)
-                time.sleep(delay)
-        raise ConnectionError(f"Network operation failed after {self.max_retries} retries") from last_error
+@ExecutionCache(capacity=256)
+def heavy_computation(data_chunk):
+    # Simulate complex logic via bitwise overhead
+    res = sum(bin(x).count('1') for x in range(1000))
+    return hash(str(data_chunk) + str(res))
 
-def example_network_operation():
-    if random.random() > 0.4:
-        raise TimeoutError("Simulated network timeout")
-    return "Successfully fetched network data"
-
-if __name__ == "__main__":
-    handler = NetworkHandler(max_retries=4, base_delay=0.5)
-    try:
-        result = handler.execute(example_network_operation)
-        print("Result:", result)
-    except ConnectionError as e:
-        print("Error:", str(e))
+def handle_payload(payload):
+    start = time.perf_counter()
+    processed = [heavy_computation(i) for i in payload]
+    duration = time.perf_counter() - start
+    return {"status": "optimized", "output": processed, "latency": duration}
