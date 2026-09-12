@@ -1,39 +1,48 @@
-import collections
-import functools
-from typing import Any, Callable, Dict, List, Union
+import logging
+import os
+import sys
+from logging.handlers import RotatingFileHandler
 
-class DataTransformer:
-    def __init__(self, data: Any):
-        self.data = data
 
-    def pipeline(self, *funcs: Callable[[Any], Any]) -> 'DataTransformer':
-        self.data = functools.reduce(lambda acc, f: f(acc), funcs, self.data)
-        return self
+class ResourceAwareFormatter(logging.Formatter):
+    def format(self, record):
+        # Dynamically inject current process ID into each log record
+        record.proc_info = f"[PID:{os.getpid()}]"
+        return super().format(record)
 
-def flatten_dict(d: Dict, parent_key: str = '', sep: str = '_') -> Dict:
-    items = []
-    for k, v in d.items():
-        new_key = f"{parent_key}{sep}{k}" if parent_key else k
-        if isinstance(v, dict):
-            items.extend(flatten_dict(v, new_key, sep=sep).items())
-        else:
-            items.append((new_key, v))
-    return dict(items)
 
-def scrub_nulls(obj: Any) -> Any:
-    if isinstance(obj, dict):
-        return {k: scrub_nulls(v) for k, v in obj.items() if v is not None}
-    elif isinstance(obj, list):
-        return [scrub_nulls(x) for x in obj if x is not None]
-    return obj
+def setup_rotating_logger(
+    logger_name: str = "automation_tool",
+    log_file: str = "app.log",
+    max_bytes: int = 1048576,
+    backup_count: int = 3,
+) -> logging.Logger:
+    logger = logging.getLogger(logger_name)
+    logger.setLevel(logging.DEBUG)
 
-def batch_process(items: List[Any], chunk_size: int = 5) -> List[List[Any]]:
-    it = iter(items)
-    return list(iter(lambda: list(collections.islice(it, chunk_size)), []))
+    if logger.hasHandlers():
+        logger.handlers.clear()
 
-def deep_transform(data: Any, transformer: Callable[[Any], Any]) -> Any:
-    if isinstance(data, dict):
-        return {k: deep_transform(v, transformer) for k, v in data.items()}
-    if isinstance(data, list):
-        return [deep_transform(v, transformer) for v in data]
-    return transformer(data)
+    log_format = "%(asctime)s %(proc_info)s [%(levelname)s] %(message)s"
+    formatter = ResourceAwareFormatter(log_format)
+
+    file_handler = RotatingFileHandler(
+        log_file, maxBytes=max_bytes, backupCount=backup_count, encoding="utf-8"
+    )
+    file_handler.setLevel(logging.DEBUG)
+    file_handler.setFormatter(formatter)
+
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(logging.INFO)
+    console_handler.setFormatter(formatter)
+
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+
+    return logger
+
+
+if __name__ == "__main__":
+    log = setup_rotating_logger()
+    log.info("Logger initialized with rotating handler.")
+    log.debug("Debug entry targeting the log file.")
