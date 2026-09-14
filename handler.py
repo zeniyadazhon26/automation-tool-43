@@ -1,35 +1,39 @@
-import functools
-import time
-import collections
+import os
+import shutil
+from pathlib import Path
 
-class ExecutionCache:
-    def __init__(self, capacity=128):
-        self.cache = collections.OrderedDict()
-        self.capacity = capacity
+class CleanupEngine:
+    def __init__(self, target_dir):
+        self.target = Path(target_dir)
+        self.extensions = {'.tmp', '.log', '.bak', '.swp'}
 
-    def __call__(self, func):
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            key = (args, frozenset(kwargs.items()))
-            if key in self.cache:
-                self.cache.move_to_end(key)
-                return self.cache[key]
-            result = func(*args, **kwargs)
-            self.cache[key] = result
-            self.cache.move_to_end(key)
-            if len(self.cache) > self.capacity:
-                self.cache.popitem(last=False)
-            return result
-        return wrapper
+    def run_sweep(self):
+        return [self._process_entry(e) for e in self.target.rglob('*') if e.suffix in self.extensions]
 
-@ExecutionCache(capacity=256)
-def heavy_computation(data_chunk):
-    # Simulate complex logic via bitwise overhead
-    res = sum(bin(x).count('1') for x in range(1000))
-    return hash(str(data_chunk) + str(res))
+    def _process_entry(self, entry):
+        try:
+            entry.unlink()
+            return f'deleted: {entry.name}'
+        except Exception as e:
+            return f'failed: {entry.name} - {str(e)}'
 
-def handle_payload(payload):
-    start = time.perf_counter()
-    processed = [heavy_computation(i) for i in payload]
-    duration = time.perf_counter() - start
-    return {"status": "optimized", "output": processed, "latency": duration}
+class Reorganizer:
+    def __init__(self, root):
+        self.root = Path(root)
+
+    def structure_by_extension(self):
+        files = [f for f in self.root.iterdir() if f.is_file()]
+        for f in files:
+            target_folder = self.root / (f.suffix.lstrip('.') or 'no_ext')
+            target_folder.mkdir(exist_ok=True)
+            shutil.move(str(f), str(target_folder / f.name))
+        return len(files)
+
+def execute_lifecycle(path):
+    sweeper = CleanupEngine(path)
+    reorg = Reorganizer(path)
+    
+    logs = sweeper.run_sweep()
+    moved_count = reorg.structure_by_extension()
+    
+    return {'cleanup_status': logs, 'moved_files': moved_count}
