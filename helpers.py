@@ -1,59 +1,43 @@
+import time
 import functools
-import re
-from typing import Any, Callable, Dict, List, Union
+import random
+from typing import Callable, Any
 
+def retry_with_jitter(max_attempts: int = 3, base_delay: float = 1.0):
+    def decorator(func: Callable):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            attempts = 0
+            while attempts < max_attempts:
+                try:
+                    return func(*args, **kwargs)
+                except Exception:
+                    attempts += 1
+                    if attempts == max_attempts:
+                        raise
+                    time.sleep(base_delay * (2 ** attempts) + random.uniform(0, 0.1))
+        return wrapper
+    return decorator
 
-class Pipeable:
-    """Wraps a helper function to allow bitwise OR pipe syntax (data | helper)."""
+def batch_process(iterable: list, size: int):
+    """Generator yielding chunks of the input list."""
+    for i in range(0, len(iterable), size):
+        yield iterable[i:i + size]
 
-    def __init__(self, func: Callable):
-        self.func = func
-        functools.update_wrapper(self, func)
+def singleton(cls):
+    """Decorator for classes with single instance."""
+    instances = {}
+    def get_instance(*args, **kwargs):
+        if cls not in instances:
+            instances[cls] = cls(*args, **kwargs)
+        return instances[cls]
+    return get_instance
 
-    def __ror__(self, other: Any) -> Any:
-        return self.func(other)
-
-    def __call__(self, *args: Any, **kwargs: Any) -> Any:
-        return self.func(*args, **kwargs)
-
-
-@Pipeable
-def sanitize_keys(data: Union[Dict, List]) -> Union[Dict, List]:
-    """Recursively convert dictionary keys to clean snake_case format."""
-    if isinstance(data, list):
-        return [sanitize_keys(item) for item in data]
-    if not isinstance(data, dict):
-        return data
-
-    sanitized = {}
-    for key, value in data.items():
-        snake_key = re.sub(r"(?<!^)(?=[A-Z])", "_", str(key)).lower().replace("-", "_")
-        sanitized[snake_key] = sanitize_keys(value)
-    return sanitized
-
-
-@Pipeable
-def flatten_dict(data: Dict[str, Any], sep: str = ".") -> Dict[str, Any]:
-    """Flatten a nested dictionary into key paths using generator iteration."""
-
-    def _flatten(obj: Any, prefix: str = "") -> Any:
-        if isinstance(obj, dict) and obj:
-            for k, v in obj.items():
-                new_prefix = f"{prefix}{sep}{k}" if prefix else str(k)
-                yield from _flatten(v, new_prefix)
-        else:
-            yield (prefix, obj)
-
-    return dict(_flatten(data))
-
-
-def batch_process(items: List[Any], batch_size: int = 10) -> List[List[Any]]:
-    """Split an iterable collection into structured chunks."""
-    if batch_size <= 0:
-        raise ValueError("batch_size must be positive")
-    return [items[i : i + batch_size] for i in range(0, len(items), batch_size)]
-
-
-def coalesce(*args: Any, default: Any = None) -> Any:
-    """Return first non-None value from arguments or specified default."""
-    return next((arg for arg in args if arg is not None), default)
+def silent_executor(func: Callable, default: Any = None):
+    """Wraps execution to ignore all exceptions."""
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except Exception:
+            return default
+    return wrapper
