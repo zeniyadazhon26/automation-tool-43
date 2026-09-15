@@ -1,33 +1,65 @@
-import os
-import shutil
-from pathlib import Path
-from typing import Union, List
+from typing import TypeVar, Iterable, Generator, Union, Callable
 
-class CleanupEngine:
-    def __init__(self, target_dir: Union[str, Path]):
-        self.target = Path(target_dir)
+T = TypeVar('T')
+U = TypeVar('U')
+R = TypeVar('R')
 
-    def purge_by_extension(self, extensions: List[str]) -> int:
-        count = 0
-        for item in self.target.rglob('*'):
-            if item.suffix.lower() in extensions:
-                try:
-                    item.unlink()
-                    count += 1
-                except OSError:
-                    continue
-        return count
+def alternate_weave(
+    left: Iterable[T],
+    right: Iterable[U],
+    transform: Callable[[Union[T, U]], R]
+) -> Generator[R, None, None]:
+    """
+    Interleave two iterables in a checkerboard fashion, applying a transformer.
 
-    def reorg_files(self, mapping: dict) -> None:
-        for file_path in self.target.iterdir():
-            if file_path.is_file():
-                dest_folder = mapping.get(file_path.suffix.lower(), 'misc')
-                target_dir = self.target / dest_folder
-                target_dir.mkdir(exist_ok=True)
-                shutil.move(str(file_path), str(target_dir / file_path.name))
+    This utility alternates elements from 'left' and 'right' inputs. If one
+    iterable is exhausted, it drains the remaining elements from the active one.
+    Highly versatile for combining dynamic parameter grids or log interleaving.
 
-def run_maintenance(path: str):
-    engine = CleanupEngine(path)
-    purged = engine.purge_by_extension(['.tmp', '.log', '.bak'])
-    engine.reorg_files({'.jpg': 'images', '.pdf': 'docs', '.py': 'src'})
-    return {'purged_count': purged, 'status': 'optimized'}
+    Args:
+        left: The primary sequence of elements.
+        right: The secondary sequence of elements.
+        transform: A mapping function to unify the different types T and U into R.
+
+    Yields:
+        A single generator producing elements of type R.
+    """
+    left_iter = iter(left)
+    right_iter = iter(right)
+    
+    left_active, right_active = True, True
+    
+    while left_active or right_active:
+        if left_active:
+            try:
+                yield transform(next(left_iter))
+            except StopIteration:
+                left_active = False
+        if right_active:
+            try:
+                yield transform(next(right_iter))
+            except StopIteration:
+                right_active = False
+
+
+def payload_flatten(
+    nested_data: Iterable[Union[T, Iterable[T]]]
+) -> Generator[T, None, None]:
+    """
+    Flattens lists and sub-iterables of mixed depth by exactly one level.
+
+    Strings and bytes are deliberately treated as scalar units instead of iterables
+    to prevent recursive character explosion in automation payload parameters.
+
+    Args:
+        nested_data: Sequence potentially containing nested sequences.
+
+    Yields:
+        Elements unpacked by one level of nesting.
+    """
+    for item in nested_data:
+        if isinstance(item, Iterable) and not isinstance(item, (str, bytes)):
+            for sub_item in item:
+                yield sub_item
+        else:
+            yield item  # type: ignore
