@@ -1,34 +1,39 @@
-from typing import Any, Callable, Dict, List, Optional
-import functools
+import os
+import shutil
+from pathlib import Path
+from typing import List, Union
 
-def compose(*functions: Callable[[Any], Any]) -> Callable[[Any], Any]:
-    """Chain multiple functions together like a pipeline."""
-    def pipeline(data: Any) -> Any:
-        return functools.reduce(lambda v, f: f(v), functions, data)
-    return pipeline
+class FileOrchestrator:
+    def __init__(self, root: str = '.'):
+        self.root = Path(root)
 
-def deep_update(mapping: Dict[Any, Any], *updating_maps: Dict[Any, Any]) -> Dict[Any, Any]:
-    """Recursively merge dictionary structures with style."""
-    updated = mapping.copy()
-    for update in updating_maps:
-        for key, value in update.items():
-            if isinstance(value, dict) and key in updated and isinstance(updated[key], dict):
-                updated[key] = deep_update(updated[key], value)
-            else:
-                updated[key] = value
-    return updated
-
-def retry_on_failure(attempts: int = 3) -> Callable[[Callable], Callable]:
-    """Decorator for resilient execution of unstable tasks."""
-    def decorator(func: Callable) -> Callable:
-        @functools.wraps(func)
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
-            last_ex: Optional[Exception] = None
-            for _ in range(attempts):
+    def purge_patterns(self, patterns: List[str]) -> int:
+        deleted_count = 0
+        for pattern in patterns:
+            for path in self.root.rglob(pattern):
                 try:
-                    return func(*args, **kwargs)
-                except Exception as e:
-                    last_ex = e
-            raise last_ex if last_ex else RuntimeError("failed")
-        return wrapper
-    return decorator
+                    if path.is_file():
+                        path.unlink()
+                    elif path.is_dir():
+                        shutil.rmtree(path)
+                    deleted_count += 1
+                except OSError:
+                    continue
+        return deleted_count
+
+    def reorganize_by_extension(self, target_dir: str = 'archive') -> None:
+        target = self.root / target_dir
+        target.mkdir(exist_ok=True)
+        
+        for file in self.root.iterdir():
+            if file.is_file() and file.parent != target:
+                ext = file.suffix.lstrip('.') or 'no_ext'
+                ext_dir = target / ext
+                ext_dir.mkdir(exist_ok=True)
+                file.rename(ext_dir / file.name)
+
+def sanitize_workspace(base_path: str = '.') -> dict:
+    orchestrator = FileOrchestrator(base_path)
+    clean_count = orchestrator.purge_patterns(['*.tmp', '__pycache__', '.DS_Store'])
+    orchestrator.reorganize_by_extension('storage')
+    return {'status': 'success', 'items_removed': clean_count}
